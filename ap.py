@@ -89,7 +89,6 @@ st.dataframe(
 # ---------------------------------------------------
 
 numeric_cols = filtered.select_dtypes(include="number").columns.tolist()
-
 categorical_cols = filtered.select_dtypes(exclude="number").columns.tolist()
 
 # ---------------------------------------------------
