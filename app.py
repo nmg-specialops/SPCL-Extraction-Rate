@@ -1,150 +1,218 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
+from data_loader import load_data
+from calculations import (
+    calculate_kpis,
+    annual_summary,
+    filter_data,
+)
+from charts import (
+    extraction_rate_chart,
+    moving_average_chart,
+)
 
-# ----------------------------------------------------
-# PAGE SETTINGS
-# ----------------------------------------------------
+# --------------------------------------------------------
+# PAGE CONFIGURATION
+# --------------------------------------------------------
 
 st.set_page_config(
     page_title="SPCL Extraction Rate Dashboard",
-    page_icon="🌲",
-    layout="wide"
+    page_icon="📈",
+    layout="wide",
 )
 
-st.title("SPCL Extraction Rate Dashboard")
+# --------------------------------------------------------
+# LOAD DATA
+# --------------------------------------------------------
 
-# ----------------------------------------------------
-# DROPBOX EXCEL FILE
-# ----------------------------------------------------
+df = load_data()
 
-EXCEL_URL = "https://www.dropbox.com/scl/fi/hjs8llnx5i8ogr365n2m2/SPCL_ExtractionRates_Historial_V.xlsx?rlkey=leoec8j7me4hkuyjysc8htaci&st=oyff9bin&dl=1"
+# --------------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------------
 
-# ----------------------------------------------------
-# LOAD WORKBOOK
-# ----------------------------------------------------
+st.sidebar.title("SPCL Dashboard")
 
-@st.cache_data(show_spinner=True)
-def load_workbook():
-    return pd.read_excel(EXCEL_URL, sheet_name=None, engine="openpyxl")
-
-try:
-    workbook = load_workbook()
-except Exception as e:
-    st.error("Unable to load the Excel workbook.")
-    st.exception(e)
-    st.stop()
-
-# ----------------------------------------------------
-# SELECT WORKSHEET
-# ----------------------------------------------------
-
-sheet = st.sidebar.selectbox(
-    "Select Worksheet",
-    list(workbook.keys())
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Overview",
+        "Extraction Trends",
+        "Annual Summary",
+        "Data Explorer",
+    ],
 )
 
-df = workbook[sheet]
+# -----------------------------
+# YEAR FILTER
+# -----------------------------
 
-st.subheader(sheet)
+years = sorted(df["Year"].unique())
 
-# ----------------------------------------------------
-# FILTERS
-# ----------------------------------------------------
-
-filtered = df.copy()
-
-st.sidebar.header("Filters")
-
-for col in filtered.columns:
-
-    if filtered[col].dtype == "object" and filtered[col].nunique() <= 50:
-
-        options = sorted(filtered[col].dropna().unique())
-
-        selected = st.sidebar.multiselect(
-            col,
-            options,
-            default=options
-        )
-
-        filtered = filtered[
-            filtered[col].isin(selected)
-        ]
-
-# ----------------------------------------------------
-# DATA
-# ----------------------------------------------------
-
-st.write(f"**Rows:** {len(filtered):,}")
-st.write(f"**Columns:** {len(filtered.columns)}")
-
-st.dataframe(
-    filtered,
-    use_container_width=True,
-    height=500
+selected_years = st.sidebar.multiselect(
+    "Year",
+    years,
+    default=years,
 )
 
-# ----------------------------------------------------
-# CHARTS
-# ----------------------------------------------------
+filtered = filter_data(df, selected_years)
 
-numeric = filtered.select_dtypes(include="number").columns.tolist()
-categorical = filtered.select_dtypes(exclude="number").columns.tolist()
+# --------------------------------------------------------
+# OVERVIEW
+# --------------------------------------------------------
 
-if numeric:
+if page == "Overview":
 
-    st.header("Visualization")
+    st.title("SPCL Extraction Rate Dashboard")
 
-    chart = st.selectbox(
-        "Chart Type",
-        ["Bar", "Line", "Scatter", "Histogram", "Box"]
+    st.markdown(
+        "Historical Extraction Rates"
     )
 
-    y = st.selectbox("Numeric Field", numeric)
+    kpi = calculate_kpis(filtered)
 
-    x = None
-    if categorical:
-        x = st.selectbox("Category", categorical)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
-    if chart == "Bar" and x:
+    c1.metric(
+        "Records",
+        f"{kpi['records']:,}"
+    )
 
-        plot = filtered.groupby(x)[y].sum().reset_index()
+    c2.metric(
+        "Average",
+        f"{kpi['average']:.2%}"
+    )
 
-        fig = px.bar(plot, x=x, y=y)
+    c3.metric(
+        "Highest",
+        f"{kpi['highest']:.2%}"
+    )
 
-    elif chart == "Line" and x:
+    c4.metric(
+        "Lowest",
+        f"{kpi['lowest']:.2%}"
+    )
 
-        plot = filtered.groupby(x)[y].sum().reset_index()
+    c5.metric(
+        "Latest",
+        f"{kpi['latest']:.2%}"
+    )
 
-        fig = px.line(plot, x=x, y=y, markers=True)
+    st.divider()
 
-    elif chart == "Scatter" and x:
+    fig = extraction_rate_chart(filtered)
 
-        fig = px.scatter(filtered, x=x, y=y)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
-    elif chart == "Histogram":
+# --------------------------------------------------------
+# EXTRACTION TRENDS
+# --------------------------------------------------------
 
-        fig = px.histogram(filtered, x=y)
+elif page == "Extraction Trends":
+
+    st.title("Extraction Trends")
+
+    tab1, tab2 = st.tabs(
+        [
+            "Historical Trend",
+            "Moving Average",
+        ]
+    )
+
+    with tab1:
+
+        fig = extraction_rate_chart(filtered)
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+        )
+
+    with tab2:
+
+        window = st.slider(
+            "Moving Average Window",
+            2,
+            10,
+            5,
+        )
+
+        fig = moving_average_chart(
+            filtered,
+            window,
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+        )
+
+# --------------------------------------------------------
+# ANNUAL SUMMARY
+# --------------------------------------------------------
+
+elif page == "Annual Summary":
+
+    st.title("Annual Summary")
+
+    summary = annual_summary(filtered)
+
+    st.dataframe(
+        summary,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    csv = summary.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "Download Annual Summary",
+        csv,
+        "Annual_Summary.csv",
+        "text/csv",
+    )
+
+# --------------------------------------------------------
+# DATA EXPLORER
+# --------------------------------------------------------
+
+elif page == "Data Explorer":
+
+    st.title("Data Explorer")
+
+    search = st.text_input(
+        "Search Date"
+    )
+
+    if search:
+
+        table = filtered[
+            filtered["Date"]
+            .astype(str)
+            .str.contains(
+                search,
+                case=False,
+            )
+        ]
 
     else:
 
-        if x:
-            fig = px.box(filtered, x=x, y=y)
-        else:
-            fig = px.box(filtered, y=y)
+        table = filtered
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(
+        table,
+        use_container_width=True,
+        height=700,
+        hide_index=True,
+    )
 
-# ----------------------------------------------------
-# DOWNLOAD FILTERED DATA
-# ----------------------------------------------------
+    csv = table.to_csv(index=False).encode("utf-8")
 
-csv = filtered.to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    "Download Filtered Data",
-    csv,
-    "SPCL_ExtractionRate_Filtered.csv",
-    "text/csv"
-)
+    st.download_button(
+        "Download Filtered Data",
+        csv,
+        "ExtractionRateData.csv",
+        "text/csv",
+    )
